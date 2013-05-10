@@ -1,3 +1,42 @@
+import java.io.PrintWriter
+import scala.io.Source
+import scala.sys.process._
+import scala.util.control.Breaks._
+
+class Stack {
+  private var stack: List[Nodo] = Nil
+
+  def push(value: Nodo) = stack = value :: stack
+
+  def pop(): Nodo = {
+    val head = stack.head
+    stack = stack.tail
+    head
+  }
+
+  def length(): Int = stack.length
+
+  def stackToList(value: Int): List[Nodo] = {
+    var list: List[Nodo] = Nil
+    list = stack.head :: list
+    breakable {
+      for (nodo <- stack.tail){
+        list = nodo :: list
+        if (nodo.getValue() == value)
+          break
+      }}
+    list.reverse
+  }
+
+
+  def exist(nodo: Nodo): Boolean = {
+    for (element <- stack)
+      if (nodo.getValue() == element.getValue())
+        return true
+    false
+    }
+}
+
 class Nodo(newValue: Int) {
   private var value: Int = newValue
   private var next: List[Nodo] = Nil
@@ -19,12 +58,10 @@ class Nodo(newValue: Int) {
 
   def setStatus(status: Boolean): Unit = this.status = status
 
-  def childs(): List[Nodo] = this.next
+  def childs(): List[Nodo] = this.next.reverse
 
-  def minChild(): Nodo = {
-    var list = this.next.sortWith((s,t) => s.getValue() < t.getValue())
-    if (list != Nil) list(0) else null
-  }
+  def minChild(): List[Nodo] = 
+    this.next.sortWith((s,t) => s.getValue() < t.getValue())
 
   def numChilds(): Int = this.next.length
 
@@ -32,14 +69,20 @@ class Nodo(newValue: Int) {
 
 
 class Grafo {
+  private val rDigit = "\\d+".r
+  private val orDigit = "^\\d+$".r
   private var Nodos: List[Nodo] = Nil
 
-  def createNodo(value: Int): Unit = {
+  private var stack = new Stack()
+  var listCycle: List[List[Nodo]] = Nil
+
+  def createNodo(value: Int): Nodo = {
     val tempNodo: Nodo = new Nodo(value)
     Nodos = tempNodo :: Nodos
+    tempNodo
   }
 
-  def allNodos(): List[Nodo] = this.Nodos
+  def allNodos(): List[Nodo] = this.Nodos.reverse
 
   def setChilds(me: Int, childs: List[Int]): Unit = {
     var Me: Nodo = searchNodo(me)
@@ -54,8 +97,7 @@ class Grafo {
       }
 
       if (Childs != Nil)
-        for (temp <- Childs)
-          Me.setNext(temp)
+        Childs map (child => Me.setNext(child))
     }
   }
 
@@ -69,36 +111,145 @@ class Grafo {
     if (tempNodo != Nil) tempNodo(0) else null
   }
 
+  def matrixFile(file: String): Unit = {
+    try {
+      val lines = Source.fromFile(file).getLines.toList
+
+      if (this.orDigit.findFirstIn(lines(0)) != None)
+        println("Numero de nodos: " + lines(0).toInt)
+
+      for (nodo <- 1 to lines(0).toInt)
+        createNodo(nodo)
+
+      for (line <- lines.tail) {
+        val nChild = line.split("\\s")
+
+        if (nChild.length > 1){
+          setChilds(nChild(0).toInt,
+            line.split("\\s").tail.map(x => x.toInt).toList)}
+      }
+    } catch {
+      case e: Exception =>
+        println("ERROR: " + e)
+    }
+  }
+
+  def bfs(root: Nodo, 
+          father: Nodo = null,
+          grafo: Grafo = null): Grafo = {
+
+    var newGrafo: Grafo = null
+
+    if (grafo == null) {
+      println("\n== Busqueda en profundidad ==")
+      newGrafo= new Grafo()
+      listCycle = Nil
+    }
+    else
+      newGrafo = grafo
+      
+    stack.push(newGrafo.createNodo(root.getValue()))
+
+    if (father != null) 
+      newGrafo.setChilds(father.getValue(), List(root.getValue()))
+
+    print(root.getValue() + " ")
+    root.setStatus(true)
+
+    for (child <- root.childs()){
+      if (!child.getStatus()) 
+        bfs(child, root, newGrafo)
+      if (stack.exist(child)) {
+        // println(root.getValue() + " --> " + child.getValue())
+        stack.push(child)
+        newGrafo.setChilds(root.getValue(), List(child.getValue()))
+        listCycle = stack.stackToList(child.getValue()) :: listCycle
+        stack.pop()
+        // return newGrafo
+      }
+    }
+    
+    stack.pop()
+    newGrafo
+  }
+
+  def cleanNodos(): Unit = Nodos.map(nodo => nodo.setStatus(false))
+
+  def Bfs(Number: Int = -1): List[Grafo] = {
+    var newList: List[Grafo] = Nil
+    listCycle = Nil
+    if (Number != -1) newList = bfs(searchNodo(Number)) :: newList
+    for (nodo <- allNodos())
+      if (!nodo.getStatus())
+        newList = bfs(nodo) :: newList
+    newList
+  }
+
+
+  def printMatrix(): Unit = {
+    for (nodo <- allNodos()){
+      println("Nodo :: " + nodo.getValue())
+      for (child <- nodo.childs())
+        println("     * hijo: " + child.getValue())
+    }
+  }
+
+  def generateGrafo(Numb: Int = -1, 
+                    name :String = "grafo") : Unit = {
+    val ciclos = new PrintWriter(name + ".gv")
+    var Number = -1
+
+    ciclos.println("digraph G {")
+    if (Numb == -1)
+      Number = allNodos().head.getValue()
+    else
+      Number = Numb
+
+    println("\n--> Generando grafo <--")
+    for (nodo <- bfs(searchNodo(Number)).allNodos()){
+      for (child <- nodo.childs()){
+        // print("\n"+nodo.getValue() + " -> " + 
+        //         child.getValue() + ";")
+        ciclos.println("    " + nodo.getValue() +
+          " -> " + child.getValue() + ";")
+      }
+    }
+
+    ciclos.println("}")
+    ciclos.close()
+    def compileGrafo() =
+      Seq("dot", "-Tpng", name+".gv", "-o", name+".png").! == 0
+    println("\n")
+    if (compileGrafo()) println("-*- Grafo generado correctamente -*-")
+
+  }
+
+
+  def cycles(): Unit = {
+    println("*** Ciclos Particulares del grafo ***")
+    for (Cycle <- grafo.listCycle) {
+      for (nodo <- Cycle.reverse) {
+        print(nodo.getValue() + " -> ")
+      }
+      println()
+    }
+  }
+
 }
-
-
-// val cinco = new Nodo(5)
-// val seis = new Nodo(6)
-// val siete = new Nodo(7)
-// val ocho = new Nodo(8)
-
-// println("Numero de hijos: " + cinco.numChilds())
-// cinco.setNext(ocho)
-// cinco.setNext(siete)
-// cinco.setNext(seis)
-// println("Numero de hijos: " + cinco.numChilds())
-// println(cinco.getNext(2).getValue())
-
-// for (nodo <- cinco.childs()) 
-//   println(nodo.getValue())
 
 
 var grafo = new Grafo()
 
-for (value <- List(5,6,7,8))
-  grafo.createNodo(value)
+grafo.matrixFile("entrada.dat")
+grafo.printMatrix()
 
-for (child <- List(5,6,7,8) zip (List(List(6,7,8), List(8,7), List(5,6), List(5,8))))
-  grafo.setChilds(child._1, child._2)
+for (grafos <- grafo.Bfs(7))
+  grafos.generateGrafo(name="grafo-" + 
+                       grafos.allNodos().head.getValue())
 
-for (nodo <- grafo.allNodos()){
-  println(nodo.getValue())
-  for (child <- nodo.childs())
-    println("\t hijo: " + child.getValue())
-  println("\t\t Nodo minimo: " + nodo.minChild().getValue())
-}
+println()
+grafo.cleanNodos()
+grafo.generateGrafo(1)
+grafo.cycles()
+
+ 
